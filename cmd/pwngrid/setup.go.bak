@@ -10,9 +10,9 @@ import (
 	"github.com/evilsocket/islazy/log"
 	"github.com/jayofelony/pwngrid/api"
 	"github.com/jayofelony/pwngrid/crypto"
-
+	"github.com/jayofelony/pwngrid/mesh"
 	"github.com/jayofelony/pwngrid/models"
-
+	"github.com/jayofelony/pwngrid/utils"
 	"github.com/jayofelony/pwngrid/version"
 	"github.com/joho/godotenv"
 )
@@ -84,6 +84,28 @@ func waitForKeys() {
 	}
 }
 
+func setupMesh() {
+	var err error
+	peer = mesh.MakeLocalPeer(utils.Hostname(), keys, advertise)
+	if !advertise {
+		return //this probably doesn't work
+	}
+
+	if err = peer.StartAdvertising(iface); err != nil {
+		log.Fatal("error while starting signaling: %v", err)
+	}
+	if router, err = mesh.StartRouting(iface, peersPath, peer); err != nil {
+		log.Fatal("%v", err)
+	} else {
+		router.OnNewPeer(func(ident string, peer *mesh.Peer) {
+			log.Info("detected new peer %s on channel %d", peer.ID(), peer.Channel)
+		})
+		router.OnPeerLost(func(ident string, peer *mesh.Peer) {
+			log.Info("peer %s lost (inactive for %fs)", peer.ID(), peer.InactiveFor())
+		})
+	}
+	log.Info("peer %s signaling is ready", peer.ID())
+}
 
 func setupDB() {
 	if err := godotenv.Load(env); err != nil {
@@ -154,6 +176,9 @@ func setupMode() string {
 		os.Exit(0)
 	}
 	// only start mesh signaling if this is not an inbox action
+	if !inbox {
+		setupMesh()
+	}
 
 	// set up the proper routes for either server or peer mode
 	err, server = api.Setup(keys, peer, router, Endpoint, Hostname)
